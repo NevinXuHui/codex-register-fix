@@ -188,6 +188,12 @@ FIRST_NAMES = [
     "Grace", "Lily", "Chloe", "Zoey", "Nora", "Aria", "Hazel", "Aurora", "Stella", "Ivy"
 ]
 
+LAST_NAMES = [
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Davis", "Miller", "Wilson", "Moore", "Taylor",
+    "Anderson", "Thomas", "Jackson", "White", "Harris", "Martin", "Thompson", "Garcia", "Robinson", "Lewis",
+    "Walker", "Allen", "King", "Wright", "Scott", "Green", "Baker", "Adams", "Nelson", "Hill"
+]
+
 def generate_random_user_info() -> dict:
     """
     生成随机用户信息
@@ -195,8 +201,10 @@ def generate_random_user_info() -> dict:
     Returns:
         包含 name 和 birthdate 的字典
     """
-    # 随机选择名字
-    name = random.choice(FIRST_NAMES)
+    # 随机选择名+姓
+    first = random.choice(FIRST_NAMES)
+    last = random.choice(LAST_NAMES)
+    name = f"{first} {last}"
 
     # 生成随机生日（18-45岁）
     current_year = datetime.now().year
