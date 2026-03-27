@@ -1049,7 +1049,7 @@ function resetButtons() {
     elements.cancelBtn.disabled = true;
     currentTask = null;
     currentBatch = null;
-    isBatchMode = false;
+    // 不重置 isBatchMode，因为这是用户在界面上选择的模式，应该保持用户的选择
     // 重置完成标志
     taskCompleted = false;
     batchCompleted = false;
