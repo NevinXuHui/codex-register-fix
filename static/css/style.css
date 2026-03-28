@@ -926,6 +926,32 @@ body {
     max-height: calc(85vh - 140px);
 }
 
+.modal-footer {
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-sm);
+}
+
+/* CPA 服务复选框列表样式 */
+#cpa-auto-refill-services-list label {
+    transition: background-color 0.2s ease;
+}
+
+#cpa-auto-refill-services-list label:hover {
+    background-color: var(--bg-secondary);
+}
+
+#cpa-auto-refill-services-list input[type="checkbox"] {
+    cursor: pointer;
+}
+
+#cpa-auto-refill-services-list input[type="checkbox"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* ============================================
    下拉菜单
    ============================================ */

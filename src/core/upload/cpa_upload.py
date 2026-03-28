@@ -279,6 +279,107 @@ def batch_upload_to_cpa(
     return results
 
 
+def get_cpa_accounts_info(api_url: str, api_token: str) -> Tuple[bool, dict]:
+    """
+    获取 CPA 服务中的账号信息和统计
+
+    Args:
+        api_url: CPA API URL
+        api_token: CPA API Token
+
+    Returns:
+        (成功标志, 数据字典或错误信息)
+        数据字典包含:
+        - total: 总账号数
+        - by_status: 按状态分类统计
+        - by_provider: 按提供商分类统计
+        - accounts: 账号列表
+    """
+    if not api_url:
+        return False, {"error": "API URL 不能为空"}
+
+    if not api_token:
+        return False, {"error": "API Token 不能为空"}
+
+    list_url = _normalize_cpa_auth_files_url(api_url)
+    headers = _build_cpa_headers(api_token)
+
+    try:
+        response = cffi_requests.get(
+            list_url,
+            headers=headers,
+            proxies=None,
+            timeout=30,
+            impersonate="chrome110",
+        )
+
+        if response.status_code != 200:
+            error_msg = _extract_cpa_error(response)
+            return False, {"error": error_msg}
+
+        data = response.json()
+        files = data.get("files", [])
+
+        # 统计信息
+        total = len(files)
+        by_status = {}
+        by_provider = {}
+        accounts = []
+
+        for file in files:
+            # 统计状态
+            status = file.get("status", "unknown")
+            disabled = file.get("disabled", False)
+            unavailable = file.get("unavailable", False)
+
+            # 确定实际状态
+            if disabled:
+                actual_status = "disabled"
+            elif unavailable:
+                actual_status = "unavailable"
+            elif status:
+                actual_status = status
+            else:
+                actual_status = "unknown"
+
+            by_status[actual_status] = by_status.get(actual_status, 0) + 1
+
+            # 统计提供商
+            provider = file.get("provider") or file.get("type", "unknown")
+            by_provider[provider] = by_provider.get(provider, 0) + 1
+
+            # 收集账号信息
+            accounts.append({
+                "name": file.get("name"),
+                "email": file.get("email"),
+                "provider": provider,
+                "status": actual_status,
+                "status_message": file.get("status_message"),
+                "disabled": disabled,
+                "unavailable": unavailable,
+                "last_refresh": file.get("last_refresh"),
+            })
+
+        result = {
+            "total": total,
+            "by_status": by_status,
+            "by_provider": by_provider,
+            "accounts": accounts,
+        }
+
+        return True, result
+
+    except cffi_requests.exceptions.ConnectionError as e:
+        return False, {"error": f"无法连接到服务器: {str(e)}"}
+    except cffi_requests.exceptions.Timeout:
+        return False, {"error": "连接超时，请检查网络配置"}
+    except json.JSONDecodeError as e:
+        return False, {"error": f"解析响应失败: {str(e)}"}
+    except Exception as e:
+        logger.error(f"获取 CPA 账号信息异常: {e}")
+        return False, {"error": f"获取账号信息失败: {str(e)}"}
+
+
 def test_cpa_connection(api_url: str, api_token: str, proxy: str = None) -> Tuple[bool, str]:
     """
     测试 CPA 连接（不走代理）
@@ -327,4 +428,65 @@ def test_cpa_connection(api_url: str, api_token: str, proxy: str = None) -> Tupl
     except cffi_requests.exceptions.Timeout:
         return False, "连接超时，请检查网络配置"
     except Exception as e:
-        return False, f"连接测试失败: {str(e)}"
+        logger.error(f"测试 CPA 连接时出错: {e}", exc_info=True)
+        return False, f"测试连接时出错: {str(e)}"
+
+
+def delete_invalid_cpa_accounts(api_url: str, api_token: str, invalid_accounts: List[dict]) -> Tuple[int, int]:
+    """
+    删除 CPA 中的无效账号
+
+    Args:
+        api_url: CPA API URL
+        api_token: CPA API Token
+        invalid_accounts: 无效账号列表，每个账号包含 name 和 email 字段
+
+    Returns:
+        (成功删除数量, 失败数量)
+    """
+    if not invalid_accounts:
+        return 0, 0
+
+    base_url = _normalize_cpa_auth_files_url(api_url)
+    headers = _build_cpa_headers(api_token)
+
+    success_count = 0
+    failed_count = 0
+
+    for account in invalid_accounts:
+        # 使用 name 字段（CPA 的文件名），而不是 email
+        name = account.get("name")
+        email = account.get("email", "")
+
+        if not name:
+            failed_count += 1
+            logger.warning(f"账号缺少 name 字段，跳过删除: {email}")
+            continue
+
+        try:
+            # DELETE /v0/management/auth-files?name={name}
+            delete_url = f"{base_url}?name={quote(name)}"
+            response = cffi_requests.delete(
+                delete_url,
+                headers=headers,
+                proxies=None,
+                timeout=30,
+                impersonate="chrome110",
+            )
+
+            if response.status_code in [200, 204]:
+                success_count += 1
+                logger.info(f"已删除无效账号: {email} (name: {name})")
+            elif response.status_code == 404:
+                # 404 可能是账号已经被删除了，不算失败
+                logger.debug(f"账号不存在（可能已删除）: {email} (name: {name})")
+                success_count += 1
+            else:
+                failed_count += 1
+                logger.warning(f"删除账号 {email} 失败: HTTP {response.status_code}")
+
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"删除账号 {email} 时出错: {e}")
+
+    return success_count, failed_count

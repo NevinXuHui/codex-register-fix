@@ -105,6 +105,17 @@ function initTabs() {
 
             btn.classList.add('active');
             document.getElementById(`${tab}-tab`).classList.add('active');
+
+            // 切换到上传标签时加载自动补充配置
+            if (tab === 'upload') {
+                loadAutoRefillConfig();
+            } else {
+                // 离开上传标签时，清理自动刷新定时器
+                if (autoRefillStatusInterval) {
+                    clearInterval(autoRefillStatusInterval);
+                    autoRefillStatusInterval = null;
+                }
+            }
         });
     });
 }
@@ -273,6 +284,23 @@ function initEventListeners() {
     if (elements.addCpaServiceBtn) {
         elements.addCpaServiceBtn.addEventListener('click', () => openCpaServiceModal());
     }
+    // 刷新 CPA 服务按钮
+    const refreshCpaServicesBtn = document.getElementById('refresh-cpa-services-btn');
+    if (refreshCpaServicesBtn) {
+        refreshCpaServicesBtn.addEventListener('click', async () => {
+            refreshCpaServicesBtn.disabled = true;
+            refreshCpaServicesBtn.textContent = '刷新中...';
+            try {
+                await loadCpaServices();
+                toast.success('已刷新');
+            } catch (e) {
+                toast.error('刷新失败: ' + e.message);
+            } finally {
+                refreshCpaServicesBtn.disabled = false;
+                refreshCpaServicesBtn.textContent = '🔄 刷新';
+            }
+        });
+    }
     if (elements.closeCpaServiceModal) {
         elements.closeCpaServiceModal.addEventListener('click', closeCpaServiceModal);
     }
@@ -311,6 +339,27 @@ function initEventListeners() {
     }
     if (elements.testSub2ApiServiceBtn) {
         elements.testSub2ApiServiceBtn.addEventListener('click', handleTestSub2ApiService);
+    }
+
+    // CPA 自动补充相关
+    const autoRefillForm = document.getElementById('cpa-auto-refill-form');
+    if (autoRefillForm) {
+        autoRefillForm.addEventListener('submit', handleSaveAutoRefillConfig);
+    }
+
+    const refreshStatusBtn = document.getElementById('refresh-auto-refill-status-btn');
+    if (refreshStatusBtn) {
+        refreshStatusBtn.addEventListener('click', refreshAutoRefillStatus);
+    }
+
+    const startBtn = document.getElementById('start-auto-refill-btn');
+    if (startBtn) {
+        startBtn.addEventListener('click', startAutoRefill);
+    }
+
+    const stopBtn = document.getElementById('stop-auto-refill-btn');
+    if (stopBtn) {
+        stopBtn.addEventListener('click', stopAutoRefill);
     }
 }
 
@@ -1222,31 +1271,62 @@ async function loadCpaServices() {
     if (!elements.cpaServicesTable) return;
     try {
         const services = await api.get('/cpa-services');
-        renderCpaServicesTable(services);
+
+        // 为每个服务获取账号信息
+        const servicesWithAccounts = await Promise.all(
+            services.map(async (service) => {
+                try {
+                    const result = await api.get(`/cpa-services/${service.id}/accounts-info`);
+                    if (result.success && result.data) {
+                        const activeCount = result.data.by_status?.active || 0;
+                        const total = result.data.total || 0;
+                        return { ...service, activeCount, total };
+                    }
+                } catch (e) {
+                    console.error(`获取服务 ${service.name} 账号信息失败:`, e);
+                }
+                return { ...service, activeCount: null, total: null };
+            })
+        );
+
+        renderCpaServicesTable(servicesWithAccounts);
     } catch (e) {
-        elements.cpaServicesTable.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--danger-color);">${e.message}</td></tr>`;
+        elements.cpaServicesTable.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger-color);">${e.message}</td></tr>`;
     }
 }
 
 function renderCpaServicesTable(services) {
     if (!services || services.length === 0) {
-        elements.cpaServicesTable.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">暂无 CPA 服务，点击「添加服务」新增</td></tr>';
+        elements.cpaServicesTable.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">暂无 CPA 服务，点击「添加服务」新增</td></tr>';
         return;
     }
-    elements.cpaServicesTable.innerHTML = services.map(s => `
+    elements.cpaServicesTable.innerHTML = services.map(s => {
+        // 格式化账号数显示
+        let accountsDisplay = '-';
+        if (s.activeCount !== null && s.total !== null) {
+            const activeColor = s.activeCount > 30 ? 'var(--success-color)' :
+                               s.activeCount > 10 ? 'var(--warning-color)' :
+                               'var(--danger-color)';
+            accountsDisplay = `<span style="color:${activeColor};font-weight:bold;">${s.activeCount}</span> / ${s.total}`;
+        }
+
+        return `
         <tr>
             <td>${escapeHtml(s.name)}</td>
             <td style="font-size:0.85rem;color:var(--text-muted);">${escapeHtml(s.api_url)}</td>
+            <td style="text-align:center;">${accountsDisplay}</td>
             <td style="text-align:center;">${s.include_proxy_url ? '🟢' : '⚪'}</td>
             <td style="text-align:center;" title="${s.enabled ? '已启用' : '已禁用'}">${s.enabled ? '✅' : '⭕'}</td>
             <td style="text-align:center;">${s.priority}</td>
             <td style="white-space:nowrap;">
+                <button class="btn btn-secondary btn-sm" onclick="viewCpaAccounts(${s.id})">📊 详情</button>
                 <button class="btn btn-secondary btn-sm" onclick="editCpaService(${s.id})">编辑</button>
                 <button class="btn btn-secondary btn-sm" onclick="testCpaServiceById(${s.id})">测试</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteCpaService(${s.id}, '${escapeHtml(s.name)}')">删除</button>
             </td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function openCpaServiceModal(service = null) {
@@ -1541,4 +1621,381 @@ function escapeHtml(text) {
     const d = document.createElement('div');
     d.textContent = text;
     return d.innerHTML;
+}
+
+// ============== CPA 账号查看 ==============
+
+async function viewCpaAccounts(serviceId) {
+    try {
+        const result = await api.get(`/cpa-services/${serviceId}/accounts-info`);
+
+        // 检查返回结果
+        if (!result) {
+            toast.error('获取账号信息失败: 无响应数据');
+            return;
+        }
+
+        if (!result.success) {
+            toast.error('获取账号信息失败: ' + (result.error || '未知错误'));
+            return;
+        }
+
+        const data = result.data;
+        if (!data) {
+            toast.error('获取账号信息失败: 数据为空');
+            return;
+        }
+
+        const byStatus = data.by_status || {};
+        const byProvider = data.by_provider || {};
+
+        // 构建状态统计 HTML
+        const statusHtml = Object.entries(byStatus)
+            .map(([status, count]) => {
+                const statusLabel = {
+                    'active': '✅ 正常',
+                    'disabled': '⭕ 禁用',
+                    'unavailable': '❌ 不可用',
+                    'unknown': '❓ 未知'
+                }[status] || status;
+                return `<div><strong>${statusLabel}:</strong> ${count}</div>`;
+            })
+            .join('');
+
+        // 构建提供商统计 HTML
+        const providerHtml = Object.entries(byProvider)
+            .map(([provider, count]) => `<div><strong>${provider}:</strong> ${count}</div>`)
+            .join('');
+
+        // 显示模态框
+        const modal = document.createElement('div');
+        modal.className = 'modal active';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h3>📊 CPA 账号统计</h3>
+                    <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-lg);">
+                        <div>
+                            <h4 style="margin-bottom: var(--spacing-sm);">总计</h4>
+                            <div style="font-size: 2rem; font-weight: bold; color: var(--primary-color);">
+                                ${data.total || 0}
+                            </div>
+                        </div>
+                        <div>
+                            <h4 style="margin-bottom: var(--spacing-sm);">按状态</h4>
+                            <div style="display: flex; flex-direction: column; gap: var(--spacing-xs);">
+                                ${statusHtml || '<div>暂无数据</div>'}
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: var(--spacing-lg);">
+                        <h4 style="margin-bottom: var(--spacing-sm);">按提供商</h4>
+                        <div style="display: flex; flex-wrap: wrap; gap: var(--spacing-sm);">
+                            ${providerHtml || '<div>暂无数据</div>'}
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">关闭</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    } catch (e) {
+        console.error('获取账号信息错误:', e);
+        toast.error('获取账号信息失败: ' + (e.message || e.toString()));
+    }
+}
+
+// ============== CPA 自动补充配置 ==============
+
+async function loadAutoRefillConfig() {
+    try {
+        const settings = await api.get('/settings/cpa-auto-refill');
+        document.getElementById('cpa-auto-refill-threshold').value = settings.threshold || 10;
+        document.getElementById('cpa-auto-refill-target').value = settings.target || 20;
+        document.getElementById('cpa-auto-refill-interval').value = settings.check_interval || 300;
+        document.getElementById('cpa-auto-delete-invalid').checked = settings.auto_delete_invalid !== false;
+
+        // 加载邮箱服务列表
+        const emailServicesData = await api.get('/email-services?enabled=true');
+        const emailServices = emailServicesData.services || [];
+        const emailServiceSelect = document.getElementById('cpa-auto-refill-email-service');
+        emailServiceSelect.innerHTML = '<option value="0">自动选择（优先级最高）</option>' +
+            emailServices.map(s => `<option value="${s.id}">${escapeHtml(s.service_type)} - ${escapeHtml(s.name || s.email || 'ID:' + s.id)}</option>`).join('');
+        emailServiceSelect.value = settings.email_service_id || 0;
+
+        // 加载 CPA 服务列表为复选框
+        const services = await api.get('/cpa-services?enabled=true');
+        const container = document.getElementById('cpa-services-checkboxes');
+        const allCheckbox = document.getElementById('cpa-service-all');
+
+        // 解析已选择的服务 ID
+        const selectedIds = settings.service_ids
+            ? settings.service_ids.split(',').map(id => parseInt(id.trim())).filter(id => id > 0)
+            : [];
+
+        // 生成服务复选框列表
+        container.innerHTML = services.map(s => `
+            <label style="display: flex; align-items: center; gap: var(--spacing-xs); padding: var(--spacing-xs); cursor: pointer; border-radius: var(--radius-sm);"
+                   onmouseover="this.style.background='var(--bg-secondary)'"
+                   onmouseout="this.style.background='transparent'">
+                <input type="checkbox" class="cpa-service-checkbox" value="${s.id}" ${selectedIds.includes(s.id) ? 'checked' : ''}>
+                <span>${escapeHtml(s.name)}</span>
+                <span style="margin-left: auto; font-size: 0.85rem; color: var(--text-muted);">${s.api_url}</span>
+            </label>
+        `).join('');
+
+        // 如果没有选择任何服务，默认选中"所有启用的服务"
+        if (selectedIds.length === 0) {
+            allCheckbox.checked = true;
+            // 禁用其他复选框
+            document.querySelectorAll('.cpa-service-checkbox').forEach(cb => {
+                cb.disabled = true;
+                cb.checked = false;
+            });
+        } else {
+            allCheckbox.checked = false;
+        }
+
+        // 添加"所有服务"复选框的事件监听
+        allCheckbox.addEventListener('change', (e) => {
+            const serviceCheckboxes = document.querySelectorAll('.cpa-service-checkbox');
+            if (e.target.checked) {
+                // 选中"所有服务"时，禁用并取消选中其他复选框
+                serviceCheckboxes.forEach(cb => {
+                    cb.disabled = true;
+                    cb.checked = false;
+                });
+            } else {
+                // 取消"所有服务"时，启用其他复选框
+                serviceCheckboxes.forEach(cb => {
+                    cb.disabled = false;
+                });
+            }
+        });
+
+        // 添加服务复选框的事件监听
+        document.querySelectorAll('.cpa-service-checkbox').forEach(cb => {
+            cb.addEventListener('change', (e) => {
+                // 如果选中了任何服务，自动取消"所有服务"
+                const anyChecked = Array.from(document.querySelectorAll('.cpa-service-checkbox')).some(c => c.checked);
+                if (anyChecked) {
+                    allCheckbox.checked = false;
+                }
+            });
+        });
+
+        // 加载服务状态
+        await refreshAutoRefillStatus();
+    } catch (e) {
+        console.error('加载自动补充配置失败:', e);
+    }
+}
+
+// 自动刷新定时器
+let autoRefillStatusInterval = null;
+
+async function refreshAutoRefillStatus() {
+    try {
+        const status = await api.get('/cpa-services/auto-refill/status');
+        const isRunning = status.running;
+
+        // 更新状态徽章
+        const badge = document.getElementById('auto-refill-status-badge');
+        if (isRunning) {
+            badge.style.display = 'inline-block';
+            badge.textContent = '运行中';
+            badge.style.background = 'var(--success-color)';
+        } else {
+            badge.style.display = 'inline-block';
+            badge.textContent = '已停止';
+            badge.style.background = 'var(--text-muted)';
+        }
+
+        // 更新按钮显示
+        document.getElementById('start-auto-refill-btn').style.display = isRunning ? 'none' : 'inline-block';
+        document.getElementById('stop-auto-refill-btn').style.display = isRunning ? 'inline-block' : 'none';
+
+        // 更新状态信息
+        const statusInfo = document.getElementById('auto-refill-status-info');
+        if (status.last_check_time || status.last_refill_time) {
+            statusInfo.style.display = 'block';
+            document.getElementById('auto-refill-running-status').textContent = isRunning ? '✅ 运行中' : '⭕ 已停止';
+            document.getElementById('auto-refill-last-check').textContent = status.last_check_time
+                ? new Date(status.last_check_time).toLocaleString('zh-CN')
+                : '-';
+            document.getElementById('auto-refill-last-refill').textContent = status.last_refill_time
+                ? new Date(status.last_refill_time).toLocaleString('zh-CN')
+                : '-';
+
+            // 显示配置摘要
+            const threshold = document.getElementById('cpa-auto-refill-threshold').value;
+            const target = document.getElementById('cpa-auto-refill-target').value;
+            document.getElementById('auto-refill-config-summary').textContent =
+                `阈值 ${threshold} / 目标 ${target}`;
+
+            // 显示当前任务
+            const currentTasks = status.current_tasks || [];
+            const tasksContainer = document.getElementById('auto-refill-current-tasks');
+            const tasksList = document.getElementById('auto-refill-tasks-list');
+
+            if (currentTasks.length > 0) {
+                tasksContainer.style.display = 'block';
+                tasksList.innerHTML = currentTasks.map(task => {
+                    const statusIcon = task.status === 'running' ? '🔄' :
+                                     task.status === 'completed' ? '✅' : '❌';
+                    const statusText = task.status === 'running' ? '运行中' :
+                                     task.status === 'completed' ? '已完成' : '失败';
+                    const statusColor = task.status === 'running' ? 'var(--primary)' :
+                                      task.status === 'completed' ? 'var(--success)' : 'var(--danger)';
+
+                    const startTime = new Date(task.started_at).toLocaleString('zh-CN');
+                    const duration = task.completed_at
+                        ? `耗时 ${Math.round((new Date(task.completed_at) - new Date(task.started_at)) / 1000)}秒`
+                        : `已运行 ${Math.round((new Date() - new Date(task.started_at)) / 1000)}秒`;
+
+                    // 构建进度信息
+                    let progressInfo = '';
+                    if (task.status === 'running' && task.progress) {
+                        const p = task.progress;
+                        const percent = p.total > 0 ? Math.round((p.completed / p.total) * 100) : 0;
+                        progressInfo = `
+                            <div style="margin-top: var(--spacing-xs);">
+                                <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-bottom: 4px;">
+                                    <span>进度: ${p.completed}/${p.total}</span>
+                                    <span style="color: var(--success);">成功 ${p.success}</span>
+                                    <span style="color: var(--danger);">失败 ${p.failed}</span>
+                                </div>
+                                <div style="background: var(--bg-tertiary); height: 6px; border-radius: 3px; overflow: hidden;">
+                                    <div style="background: var(--primary); height: 100%; width: ${percent}%; transition: width 0.3s;"></div>
+                                </div>
+                            </div>
+                        `;
+                    } else if (task.status === 'completed') {
+                        progressInfo = `
+                            <div style="margin-top: var(--spacing-xs); font-size: 0.85em;">
+                                <span style="color: var(--success);">✓ 成功 ${task.success_count || 0}</span>
+                                <span style="margin-left: var(--spacing-sm); color: var(--danger);">✗ 失败 ${task.failed_count || 0}</span>
+                            </div>
+                        `;
+                    }
+
+                    return `
+                        <div style="padding: var(--spacing-sm); background: var(--bg-primary); border-radius: var(--radius-sm); border-left: 3px solid ${statusColor};">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <strong>${statusIcon} ${task.service_name}</strong>
+                                    <span style="margin-left: var(--spacing-sm); color: var(--text-muted);">
+                                        注册 ${task.count} 个账号
+                                    </span>
+                                </div>
+                                <span style="color: ${statusColor}; font-weight: 500;">${statusText}</span>
+                            </div>
+                            ${progressInfo}
+                            <div style="margin-top: var(--spacing-xs); font-size: 0.9em; color: var(--text-muted);">
+                                ${startTime} · ${duration}
+                                ${task.error ? `<br><span style="color: var(--danger);">错误: ${task.error}</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                tasksContainer.style.display = 'none';
+            }
+        } else {
+            statusInfo.style.display = 'none';
+        }
+
+        // 自动刷新：如果有运行中的任务，启动定时刷新
+        const hasRunningTasks = (status.current_tasks || []).some(t => t.status === 'running');
+        if (hasRunningTasks && !autoRefillStatusInterval) {
+            // 每5秒刷新一次
+            autoRefillStatusInterval = setInterval(refreshAutoRefillStatus, 5000);
+        } else if (!hasRunningTasks && autoRefillStatusInterval) {
+            // 没有运行中的任务，停止自动刷新
+            clearInterval(autoRefillStatusInterval);
+            autoRefillStatusInterval = null;
+        }
+    } catch (e) {
+        console.error('获取自动补充状态失败:', e);
+    }
+}
+
+async function handleSaveAutoRefillConfig(e) {
+    e.preventDefault();
+
+    const threshold = parseInt(document.getElementById('cpa-auto-refill-threshold').value);
+    const target = parseInt(document.getElementById('cpa-auto-refill-target').value);
+    const interval = parseInt(document.getElementById('cpa-auto-refill-interval').value);
+    const emailServiceId = parseInt(document.getElementById('cpa-auto-refill-email-service').value);
+    const autoDeleteInvalid = document.getElementById('cpa-auto-delete-invalid').checked;
+
+    // 获取选中的服务 ID
+    const allCheckbox = document.getElementById('cpa-service-all');
+    let serviceIdsStr = '';
+
+    if (!allCheckbox.checked) {
+        // 如果没有选中"所有服务"，获取选中的服务 ID
+        const selectedCheckboxes = Array.from(document.querySelectorAll('.cpa-service-checkbox:checked'));
+        const selectedIds = selectedCheckboxes.map(cb => parseInt(cb.value));
+
+        if (selectedIds.length === 0) {
+            toast.error('请至少选择一个服务或选择"所有启用的服务"');
+            return;
+        }
+
+        serviceIdsStr = selectedIds.join(',');
+    }
+    // 如果选中"所有服务"，serviceIdsStr 保持为空字符串
+
+    if (threshold >= target) {
+        toast.error('补充目标数量必须大于阈值');
+        return;
+    }
+
+    try {
+        await api.post('/settings/cpa-auto-refill', {
+            enabled: true,  // 保存配置时自动启用
+            threshold: threshold,
+            target: target,
+            check_interval: interval,
+            service_ids: serviceIdsStr,
+            email_service_id: emailServiceId,
+            auto_delete_invalid: autoDeleteInvalid
+        });
+        toast.success('配置已保存');
+
+        // 保存后自动启动服务
+        await startAutoRefill();
+    } catch (e) {
+        toast.error('保存配置失败: ' + e.message);
+    }
+}
+
+async function startAutoRefill() {
+    try {
+        const result = await api.post('/cpa-services/auto-refill/start');
+        if (result.success) {
+            toast.success('自动补充服务已启动');
+            await refreshAutoRefillStatus();
+        }
+    } catch (e) {
+        toast.error('启动服务失败: ' + e.message);
+    }
+}
+
+async function stopAutoRefill() {
+    try {
+        const result = await api.post('/cpa-services/auto-refill/stop');
+        if (result.success) {
+            toast.success('自动补充服务已停止');
+            await refreshAutoRefillStatus();
+        }
+    } catch (e) {
+        toast.error('停止服务失败: ' + e.message);
+    }
 }

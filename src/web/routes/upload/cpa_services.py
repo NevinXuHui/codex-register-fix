@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from ....database import crud
 from ....database.session import get_db
-from ....core.upload.cpa_upload import test_cpa_connection
+from ....core.upload.cpa_upload import test_cpa_connection, get_cpa_accounts_info
 
 router = APIRouter()
 
@@ -177,3 +177,55 @@ async def test_cpa_connection_direct(request: CpaServiceTestRequest):
         raise HTTPException(status_code=400, detail="api_url 和 api_token 不能为空")
     success, message = test_cpa_connection(request.api_url, request.api_token)
     return {"success": success, "message": message}
+
+
+@router.get("/{service_id}/accounts-info")
+async def get_cpa_service_accounts_info(service_id: int):
+    """获取 CPA 服务中的账号信息和统计"""
+    with get_db() as db:
+        service = crud.get_cpa_service_by_id(db, service_id)
+        if not service:
+            return {"success": False, "error": f"CPA 服务 ID {service_id} 不存在"}
+
+        success, result = get_cpa_accounts_info(service.api_url, service.api_token)
+        if not success:
+            error_msg = result.get("error", "未知错误") if isinstance(result, dict) else str(result)
+            return {"success": False, "error": error_msg}
+        return {"success": True, "data": result}
+
+
+@router.post("/accounts-info")
+async def get_cpa_accounts_info_direct(request: CpaServiceTestRequest):
+    """直接获取 CPA 账号信息（用于测试）"""
+    if not request.api_url or not request.api_token:
+        raise HTTPException(status_code=400, detail="api_url 和 api_token 不能为空")
+    success, result = get_cpa_accounts_info(request.api_url, request.api_token)
+    if not success:
+        return {"success": False, "error": result.get("error", "未知错误")}
+    return {"success": True, "data": result}
+
+
+@router.get("/auto-refill/status")
+async def get_auto_refill_status():
+    """获取自动补充服务状态"""
+    from ....core.cpa_auto_refill import get_auto_refill_service
+    service = get_auto_refill_service()
+    return service.get_status()
+
+
+@router.post("/auto-refill/start")
+async def start_auto_refill():
+    """启动自动补充服务"""
+    from ....core.cpa_auto_refill import get_auto_refill_service
+    service = get_auto_refill_service()
+    await service.start()
+    return {"success": True, "message": "自动补充服务已启动"}
+
+
+@router.post("/auto-refill/stop")
+async def stop_auto_refill():
+    """停止自动补充服务"""
+    from ....core.cpa_auto_refill import get_auto_refill_service
+    service = get_auto_refill_service()
+    await service.stop()
+    return {"success": True, "message": "自动补充服务已停止"}

@@ -207,7 +207,10 @@
                 <div class="card" style="margin-top: var(--spacing-lg);">
                     <div class="card-header">
                         <h3>☁️ CPA 服务</h3>
-                        <button class="btn btn-primary btn-sm" id="add-cpa-service-btn">+ 添加服务</button>
+                        <div style="display: flex; gap: var(--spacing-sm);">
+                            <button class="btn btn-secondary btn-sm" id="refresh-cpa-services-btn">🔄 刷新</button>
+                            <button class="btn btn-primary btn-sm" id="add-cpa-service-btn">+ 添加服务</button>
+                        </div>
                     </div>
                     <div class="card-body" style="padding: 0;">
                         <div class="table-container">
@@ -216,17 +219,119 @@
                                     <tr>
                                         <th style="width:150px;">名称</th>
                                         <th>API URL</th>
+                                        <th style="width:100px;text-align:center;">有效账号</th>
                                         <th style="width:90px;">代理写入</th>
                                         <th style="width:80px;">状态</th>
                                         <th style="width:60px;text-align:center;">优先级</th>
-                                        <th style="width:220px;">操作</th>
+                                        <th style="width:280px;">操作</th>
                                     </tr>
                                 </thead>
                                 <tbody id="cpa-services-table">
-                                    <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</td></tr>
+                                    <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">加载中...</td></tr>
                                 </tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+
+                <!-- CPA 自动补充配置 -->
+                <div class="card" style="margin-top: var(--spacing-lg);">
+                    <div class="card-header">
+                        <h3>🔄 CPA 账号自动补充</h3>
+                        <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                            <span id="auto-refill-status-badge" class="badge" style="display: none;">运行中</span>
+                            <button class="btn btn-secondary btn-sm" id="refresh-auto-refill-status-btn">🔄 刷新状态</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form id="cpa-auto-refill-form">
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="cpa-auto-delete-invalid" name="auto_delete_invalid" checked>
+                                    自动删除无效账号
+                                </label>
+                                <p class="hint">每次检查时自动删除 CPA 中状态为无效的账号</p>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="cpa-auto-refill-threshold">触发阈值</label>
+                                    <input type="number" id="cpa-auto-refill-threshold" name="threshold" value="10" min="1" max="1000">
+                                    <p class="hint">有效账号数低于此值时触发自动补充</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="cpa-auto-refill-target">补充目标</label>
+                                    <input type="number" id="cpa-auto-refill-target" name="target" value="20" min="1" max="1000">
+                                    <p class="hint">每次补充到此数量（例如：阈值10，目标20，则补充10个）</p>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="cpa-auto-refill-interval">检查间隔（秒）</label>
+                                    <input type="number" id="cpa-auto-refill-interval" name="interval" value="300" min="60" max="86400">
+                                    <p class="hint">每隔多久检查一次</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="cpa-auto-refill-email-service">使用的邮箱服务</label>
+                                    <select id="cpa-auto-refill-email-service" name="email_service_id">
+                                        <option value="0">自动选择（优先级最高）</option>
+                                        <!-- 动态加载邮箱服务 -->
+                                    </select>
+                                    <p class="hint">选择用于自动注册的邮箱服务</p>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label>监控的 CPA 服务</label>
+                                <div id="cpa-auto-refill-services-list" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: var(--spacing-sm);">
+                                    <label style="display: flex; align-items: center; gap: var(--spacing-xs); padding: var(--spacing-xs); cursor: pointer;">
+                                        <input type="checkbox" id="cpa-service-all" value="all" checked>
+                                        <span style="font-weight: 500;">所有启用的服务</span>
+                                    </label>
+                                    <div id="cpa-services-checkboxes" style="margin-left: var(--spacing-md);">
+                                        <!-- 动态加载服务列表 -->
+                                    </div>
+                                </div>
+                                <p class="hint">选择要监控的服务，默认监控所有启用的服务</p>
+                            </div>
+
+                            <!-- 状态信息 -->
+                            <div id="auto-refill-status-info" style="margin-top: var(--spacing-md); padding: var(--spacing-md); background: var(--bg-secondary); border-radius: var(--radius-md); display: none;">
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--spacing-md);">
+                                    <div>
+                                        <strong>服务状态：</strong>
+                                        <span id="auto-refill-running-status">-</span>
+                                    </div>
+                                    <div>
+                                        <strong>最后检查：</strong>
+                                        <span id="auto-refill-last-check">-</span>
+                                    </div>
+                                    <div>
+                                        <strong>最后补充：</strong>
+                                        <span id="auto-refill-last-refill">-</span>
+                                    </div>
+                                    <div>
+                                        <strong>配置：</strong>
+                                        <span id="auto-refill-config-summary">-</span>
+                                    </div>
+                                </div>
+
+                                <!-- 当前任务列表 -->
+                                <div id="auto-refill-current-tasks" style="margin-top: var(--spacing-md); display: none;">
+                                    <strong style="display: block; margin-bottom: var(--spacing-sm);">当前任务：</strong>
+                                    <div id="auto-refill-tasks-list" style="display: flex; flex-direction: column; gap: var(--spacing-sm);">
+                                        <!-- 动态加载任务 -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">💾 保存配置</button>
+                                <button type="button" class="btn btn-success" id="start-auto-refill-btn" style="display: none;">▶️ 启动服务</button>
+                                <button type="button" class="btn btn-danger" id="stop-auto-refill-btn" style="display: none;">⏸️ 停止服务</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
 

@@ -172,6 +172,7 @@ def create_app() -> FastAPI:
         """应用启动事件"""
         import asyncio
         from ..database.init_db import initialize_database
+        from ..core.cpa_auto_refill import get_auto_refill_service
 
         # 确保数据库已初始化（reload 模式下子进程也需要初始化）
         try:
@@ -189,9 +190,28 @@ def create_app() -> FastAPI:
         logger.info(f"数据库: {settings.database_url}")
         logger.info("=" * 50)
 
+        # 启动 CPA 自动补充服务
+        if settings.cpa_auto_refill_enabled:
+            try:
+                auto_refill_service = get_auto_refill_service()
+                await auto_refill_service.start()
+                logger.info("CPA 自动补充服务已启动")
+            except Exception as e:
+                logger.error(f"启动 CPA 自动补充服务失败: {e}")
+
     @app.on_event("shutdown")
     async def shutdown_event():
         """应用关闭事件"""
+        from ..core.cpa_auto_refill import get_auto_refill_service
+
+        # 停止 CPA 自动补充服务
+        try:
+            auto_refill_service = get_auto_refill_service()
+            await auto_refill_service.stop()
+            logger.info("CPA 自动补充服务已停止")
+        except Exception as e:
+            logger.error(f"停止 CPA 自动补充服务失败: {e}")
+
         logger.info("应用关闭")
 
     return app

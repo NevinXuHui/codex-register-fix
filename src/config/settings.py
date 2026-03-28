@@ -342,6 +342,48 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
         description="CPA API Token",
         is_secret=True
     ),
+    "cpa_auto_refill_enabled": SettingDefinition(
+        db_key="cpa.auto_refill_enabled",
+        default_value=False,
+        category=SettingCategory.CPA,
+        description="是否启用 CPA 账号自动补充"
+    ),
+    "cpa_auto_refill_threshold": SettingDefinition(
+        db_key="cpa.auto_refill_threshold",
+        default_value=10,
+        category=SettingCategory.CPA,
+        description="CPA 有效账号数阈值（低于此值自动注册）"
+    ),
+    "cpa_auto_refill_target": SettingDefinition(
+        db_key="cpa.auto_refill_target",
+        default_value=20,
+        category=SettingCategory.CPA,
+        description="CPA 自动补充目标账号数"
+    ),
+    "cpa_auto_refill_check_interval": SettingDefinition(
+        db_key="cpa.auto_refill_check_interval",
+        default_value=300,
+        category=SettingCategory.CPA,
+        description="CPA 账号检查间隔（秒）"
+    ),
+    "cpa_auto_refill_service_ids": SettingDefinition(
+        db_key="cpa.auto_refill_service_ids",
+        default_value="",
+        category=SettingCategory.CPA,
+        description="CPA 自动补充监控的服务 ID 列表（逗号分隔，空表示所有启用的）"
+    ),
+    "cpa_auto_refill_email_service_id": SettingDefinition(
+        db_key="cpa.auto_refill_email_service_id",
+        default_value=0,
+        category=SettingCategory.CPA,
+        description="CPA 自动补充使用的邮箱服务 ID（0表示自动选择优先级最高的）"
+    ),
+    "cpa_auto_delete_invalid": SettingDefinition(
+        db_key="cpa.auto_delete_invalid",
+        default_value=True,
+        category=SettingCategory.CPA,
+        description="自动删除 CPA 中的无效账号"
+    ),
 
     # 验证码配置
     "email_code_timeout": SettingDefinition(
@@ -405,6 +447,13 @@ SETTING_TYPES: Dict[str, Type] = {
     "tempmail_max_retries": int,
     "tm_enabled": bool,
     "cpa_enabled": bool,
+    "cpa_auto_refill_enabled": bool,
+    "cpa_auto_refill_threshold": int,
+    "cpa_auto_refill_target": int,
+    "cpa_auto_refill_check_interval": int,
+    "cpa_auto_refill_service_ids": str,
+    "cpa_auto_refill_email_service_id": int,
+    "cpa_auto_delete_invalid": bool,
     "email_code_timeout": int,
     "email_code_poll_interval": int,
     "outlook_provider_priority": list,
@@ -688,6 +737,13 @@ class Settings(BaseModel):
     cpa_enabled: bool = False
     cpa_api_url: str = ""
     cpa_api_token: SecretStr = SecretStr("")
+    cpa_auto_refill_enabled: bool = False
+    cpa_auto_refill_threshold: int = 10
+    cpa_auto_refill_target: int = 20
+    cpa_auto_refill_check_interval: int = 300
+    cpa_auto_refill_service_ids: str = ""
+    cpa_auto_refill_email_service_id: int = 0
+    cpa_auto_delete_invalid: bool = True
 
     # 验证码配置
     email_code_timeout: int = 120

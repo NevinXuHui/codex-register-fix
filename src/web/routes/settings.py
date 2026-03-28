@@ -779,3 +779,57 @@ async def test_team_manager_connection(request: TeamManagerTestRequest):
 
     success, message = do_test(request.api_url, api_key)
     return {"success": success, "message": message}
+
+
+# ============== CPA 自动补充设置 ==============
+
+class CpaAutoRefillSettings(BaseModel):
+    """CPA 自动补充设置"""
+    enabled: Optional[bool] = None
+    threshold: Optional[int] = None
+    target: Optional[int] = None
+    check_interval: Optional[int] = None
+    service_ids: Optional[str] = None
+    email_service_id: Optional[int] = None
+    auto_delete_invalid: Optional[bool] = None
+
+
+@router.get("/cpa-auto-refill")
+async def get_cpa_auto_refill_settings():
+    """获取 CPA 自动补充设置"""
+    settings = get_settings()
+    return {
+        "enabled": settings.cpa_auto_refill_enabled,
+        "threshold": settings.cpa_auto_refill_threshold,
+        "target": settings.cpa_auto_refill_target,
+        "check_interval": settings.cpa_auto_refill_check_interval,
+        "service_ids": settings.cpa_auto_refill_service_ids,
+        "email_service_id": settings.cpa_auto_refill_email_service_id,
+        "auto_delete_invalid": settings.cpa_auto_delete_invalid,
+    }
+
+
+@router.post("/cpa-auto-refill")
+async def update_cpa_auto_refill_settings(request: CpaAutoRefillSettings):
+    """更新 CPA 自动补充设置"""
+    update_dict = {}
+
+    if request.enabled is not None:
+        update_dict["cpa_auto_refill_enabled"] = request.enabled
+    if request.threshold is not None:
+        update_dict["cpa_auto_refill_threshold"] = request.threshold
+    if request.target is not None:
+        update_dict["cpa_auto_refill_target"] = request.target
+    if request.check_interval is not None:
+        update_dict["cpa_auto_refill_check_interval"] = request.check_interval
+    if request.service_ids is not None:
+        update_dict["cpa_auto_refill_service_ids"] = request.service_ids
+    if request.email_service_id is not None:
+        update_dict["cpa_auto_refill_email_service_id"] = request.email_service_id
+    if request.auto_delete_invalid is not None:
+        update_dict["cpa_auto_delete_invalid"] = request.auto_delete_invalid
+
+    if update_dict:
+        update_settings(**update_dict)
+
+    return {"success": True, "message": "CPA 自动补充设置已更新"}
